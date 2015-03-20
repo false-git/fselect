@@ -1,15 +1,35 @@
 #include "fselect.h"
 #include <unistd.h>
+#include <sys/select.h>
 
 #ifdef FSELECT_THREAD_SAFE
-#define LOCK std::lock_guard<std::recursive_mutex> lock(mutex)
+#include <mutex>
+#define LOCK std::lock_guard<std::recursive_mutex> lock(d->mutex)
 #else
 #define LOCK
 #endif
 
 namespace wl {
 
-    fselect::fselect() {
+    class fselect_private {
+    public:
+	fselect_private();
+	~fselect_private();
+	fd_set readfds;
+	fd_set writefds;
+	fd_set exceptfds;
+	fd_set readfdresults;
+	fd_set writefdresults;
+	fd_set exceptfdresults;
+	int nfds;
+	int pipe_fds[2];
+#ifdef FSELECT_THREAD_SAFE
+	mutable std::recursive_mutex mutex;
+#endif
+	void fix_nfds();
+    };
+
+    fselect_private::fselect_private() {
 	FD_ZERO(&readfds);
 	FD_ZERO(&writefds);
 	FD_ZERO(&exceptfds);
@@ -29,7 +49,7 @@ namespace wl {
 	}
     }
 
-    fselect::~fselect() {
+    fselect_private::~fselect_private() {
 	if (pipe_fds[0] != -1) {
 	    close(pipe_fds[0]);
 	}
@@ -37,10 +57,16 @@ namespace wl {
 	    close(pipe_fds[1]);
 	}
     }
+    static void delete_private(fselect_private *p) {
+	delete p;
+    }
+
+    fselect::fselect(): d(std::unique_ptr<fselect_private, private_deleter>(new fselect_private, delete_private)) {
+    }
 
     bool fselect::is_valid() const {
 	LOCK;
-	return pipe_fds[0] != -1;
+	return d->pipe_fds[0] != -1;
     }
 
     int fselect::select(bool &is_stop) {
@@ -52,20 +78,20 @@ namespace wl {
 	fd_set r, w, e;
 	{
 	    LOCK;
-	    r = readfds;
-	    w = writefds;
-	    e = exceptfds;
+	    r = d->readfds;
+	    w = d->writefds;
+	    e = d->exceptfds;
 	}
-	int result = ::select(nfds + 1, &r, &w, &e, 0);
+	int result = ::select(d->nfds + 1, &r, &w, &e, 0);
 	{
 	    LOCK;
-	    readfdresults = r;
-	    writefdresults = w;
-	    exceptfdresults = e;
+	    d->readfdresults = r;
+	    d->writefdresults = w;
+	    d->exceptfdresults = e;
 	}
-	if (result > 0 && read_isready(pipe_fds[0])) {
+	if (result > 0 && read_isready(d->pipe_fds[0])) {
 	    char buf[256];
-	    read(pipe_fds[0], buf, sizeof(buf));
+	    read(d->pipe_fds[0], buf, sizeof(buf));
 	    result--;
 	    is_stop = true;
 	}
@@ -74,102 +100,102 @@ namespace wl {
 
     void fselect::stop() {
 	LOCK;
-	if (pipe_fds[1] != -1) {
+	if (d->pipe_fds[1] != -1) {
 	    static char buf[1] = {'1'};
-	    write(pipe_fds[1], buf, sizeof(buf));
+	    write(d->pipe_fds[1], buf, sizeof(buf));
 	}
     }
 
     void fselect::read_unwatch(int fd) {
 	LOCK;
 	if (fd == -1) {
-	    FD_ZERO(&readfds);
-	    if (pipe_fds[0] != -1) {
-		FD_SET(pipe_fds[0], &readfds);
+	    FD_ZERO(&d->readfds);
+	    if (d->pipe_fds[0] != -1) {
+		FD_SET(d->pipe_fds[0], &d->readfds);
 	    }
-	} else if (fd != pipe_fds[0]) {
-	    FD_CLR(fd, &readfds);
+	} else if (fd != d->pipe_fds[0]) {
+	    FD_CLR(fd, &d->readfds);
 	}
-	fix_nfds();
+	d->fix_nfds();
     }
     bool fselect::read_iswatch(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &readfds);
+	return FD_ISSET(fd, &d->readfds);
     }
     bool fselect::read_isready(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &readfdresults);
+	return FD_ISSET(fd, &d->readfdresults);
     }
     void fselect::read_watch(int fd) {
 	LOCK;
-	FD_SET(fd, &readfds);
-	if (fd > nfds) {
-	    nfds = fd;
+	FD_SET(fd, &d->readfds);
+	if (fd > d->nfds) {
+	    d->nfds = fd;
 	}
     }
 
     void fselect::write_unwatch(int fd) {
 	LOCK;
 	if (fd == -1) {
-	    FD_ZERO(&readfds);
+	    FD_ZERO(&d->readfds);
 	} else {
-	    FD_CLR(fd, &writefds);
+	    FD_CLR(fd, &d->writefds);
 	}
-	fix_nfds();
+	d->fix_nfds();
     }
     bool fselect::write_iswatch(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &writefds);
+	return FD_ISSET(fd, &d->writefds);
     }
     bool fselect::write_isready(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &writefdresults);
+	return FD_ISSET(fd, &d->writefdresults);
     }
     void fselect::write_watch(int fd) {
 	LOCK;
-	FD_SET(fd, &writefds);
-	if (fd > nfds) {
-	    nfds = fd;
+	FD_SET(fd, &d->writefds);
+	if (fd > d->nfds) {
+	    d->nfds = fd;
 	}
     }
 
     void fselect::except_unwatch(int fd) {
 	LOCK;
 	if (fd == -1) {
-	    FD_ZERO(&readfds);
+	    FD_ZERO(&d->readfds);
 	} else {
-	    FD_CLR(fd, &exceptfds);
+	    FD_CLR(fd, &d->exceptfds);
 	}
-	fix_nfds();
+	d->fix_nfds();
     }
     bool fselect::except_iswatch(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &exceptfds);
+	return FD_ISSET(fd, &d->exceptfds);
     }
     bool fselect::except_isready(int fd) const {
 	LOCK;
-	return FD_ISSET(fd, &exceptfdresults);
+	return FD_ISSET(fd, &d->exceptfdresults);
     }
     void fselect::except_watch(int fd) {
 	LOCK;
-	FD_SET(fd, &exceptfds);
-	if (fd > nfds) {
-	    nfds = fd;
+	FD_SET(fd, &d->exceptfds);
+	if (fd > d->nfds) {
+	    d->nfds = fd;
 	}
     }
 
-    void fselect::fix_nfds() {
+    void fselect_private::fix_nfds() {
 	int _nfds = -1;
 	for (int i = nfds; i >= 0; i--) {
-	    if (read_iswatch(i)) {
+	    if (FD_ISSET(i, &readfds)) {
 		_nfds = i;
 		break;
 	    }
-	    if (write_iswatch(i)) {
+	    if (FD_ISSET(i, &writefds)) {
 		_nfds = i;
 		break;
 	    }
-	    if (except_iswatch(i)) {
+	    if (FD_ISSET(i, &exceptfds)) {
 		_nfds = i;
 		break;
 	    }

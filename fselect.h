@@ -1,15 +1,13 @@
 #ifndef __FSELECT_H
 #define __FSELECT_H
 
-#include <sys/select.h>
-#ifdef FSELECT_THREAD_SAFE
-#include <mutex>
-#endif
+#include <memory>
 
 /*!
  * \brief fselectが所属するnamespace
  */
 namespace wl {
+    class fselect_private;
     /*!
      * \brief select(2)のwrapperクラス
      *
@@ -46,7 +44,7 @@ namespace wl {
 	/*!
 	 * \brief デストラクタ
 	 */
-	virtual ~fselect();
+	virtual ~fselect() = default;
 	/*!
 	 * \brief オブジェクトが有効かどうかを返す。
 	 * @return 有効なときtrue
@@ -129,23 +127,13 @@ namespace wl {
 	 */
 	void except_watch(int fd);
     private:
-	fd_set readfds;
-	fd_set writefds;
-	fd_set exceptfds;
-	fd_set readfdresults;
-	fd_set writefdresults;
-	fd_set exceptfdresults;
-	int nfds;
-	int pipe_fds[2];
-#ifdef FSELECT_THREAD_SAFE
-	mutable std::recursive_mutex mutex;
-#endif
+	typedef void (*private_deleter)(fselect_private*);
+	std::unique_ptr<fselect_private, private_deleter> d;
 
 	fselect(fselect const&) = delete;
 	fselect& operator=(fselect const&) = delete;
 	fselect(fselect &&) = delete;
 	fselect& operator=(fselect &&) = delete;
-	void fix_nfds();
     };
 
 }
