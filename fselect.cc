@@ -57,12 +57,11 @@ namespace wl {
 	    close(pipe_fds[1]);
 	}
     }
-    static void delete_private(fselect_private *p) {
-	delete p;
+
+    fselect::fselect(): d(std::unique_ptr<fselect_private>(new fselect_private)) {
     }
 
-    fselect::fselect(): d(std::unique_ptr<fselect_private, private_deleter>(new fselect_private, delete_private)) {
-    }
+    fselect::~fselect() = default;
 
     bool fselect::is_valid() const {
 	LOCK;

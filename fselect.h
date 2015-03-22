@@ -44,7 +44,7 @@ namespace wl {
 	/*!
 	 * \brief デストラクタ
 	 */
-	virtual ~fselect() = default;
+	virtual ~fselect();
 	/*!
 	 * \brief オブジェクトが有効かどうかを返す。
 	 * @return 有効なときtrue
@@ -127,8 +127,7 @@ namespace wl {
 	 */
 	void except_watch(int fd);
     private:
-	typedef void (*private_deleter)(fselect_private*);
-	std::unique_ptr<fselect_private, private_deleter> d;
+	std::unique_ptr<fselect_private> d;
 
 	fselect(fselect const&) = delete;
 	fselect& operator=(fselect const&) = delete;
