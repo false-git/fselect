@@ -7,6 +7,7 @@
  * \brief fselectが所属するnamespace
  */
 namespace wl {
+    class Select;
     class fselect_private;
     /*!
      * \brief select(2)のwrapperクラス
@@ -39,8 +40,9 @@ namespace wl {
     public:
 	/*!
 	 * \brief コンストラクタ
+	 * @param select select(2)呼び出しのためのクラス
 	 */
-	fselect();
+	fselect(Select *select = nullptr);
 	/*!
 	 * \brief デストラクタ
 	 */

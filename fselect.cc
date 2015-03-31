@@ -1,4 +1,5 @@
 #include "fselect.h"
+#include "select.h"
 #include <unistd.h>
 #include <sys/select.h>
 
@@ -23,6 +24,7 @@ namespace wl {
 	fd_set exceptfdresults;
 	int nfds;
 	int pipe_fds[2];
+	std::unique_ptr<Select> select;
 #ifdef FSELECT_THREAD_SAFE
 	mutable std::recursive_mutex mutex;
 #endif
@@ -58,7 +60,11 @@ namespace wl {
 	}
     }
 
-    fselect::fselect(): d(std::unique_ptr<fselect_private>(new fselect_private)) {
+    fselect::fselect(Select *select): d(std::unique_ptr<fselect_private>(new fselect_private)) {
+	if (!select) {
+	    select = new Select;
+	}
+	d->select = std::unique_ptr<Select>(select);
     }
 
     fselect::~fselect() = default;
@@ -81,7 +87,7 @@ namespace wl {
 	    w = d->writefds;
 	    e = d->exceptfds;
 	}
-	int result = ::select(d->nfds + 1, &r, &w, &e, 0);
+	int result = d->select->select(d->nfds + 1, &r, &w, &e, 0);
 	{
 	    LOCK;
 	    d->readfdresults = r;

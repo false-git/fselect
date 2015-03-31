@@ -1,4 +1,5 @@
 #include "fselect.h"
+#include "select.h"
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
